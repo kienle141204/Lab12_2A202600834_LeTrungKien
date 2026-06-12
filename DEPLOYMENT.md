@@ -1,41 +1,92 @@
 # Deployment Information
 
 ## Public URL
-https://lab11-production-c560.up.railway.app
+https://economics-chatbot-production-9bb8.up.railway.app
 
 ## Platform
 Railway
 
+## Architecture
+- **App service**: FastAPI + Uvicorn (economics-chatbot)
+- **Redis service**: Session storage + rate limiting
+- **LLM**: OpenAI GPT-4o-mini
+- **Auth**: API Key (`X-API-Key` header)
+
 ## Test Commands
 
-### Health Check
+### Health Check (liveness probe)
 ```bash
-curl https://lab11-production-c560.up.railway.app/health
-# Expected: {"status":"ok","uptime_seconds":...,"platform":"Railway","timestamp":"..."}
+curl https://economics-chatbot-production-9bb8.up.railway.app/health
+# Expected: {"status":"ok","environment":"production","uptime_seconds":...}
 ```
 
-### Authentication required (no key)
+### Readiness Probe (checks Redis)
 ```bash
-curl -X POST https://lab11-production-c560.up.railway.app/ask \
-  -H "Content-Type: application/json" \
-  -d '{"question": "Hello"}'
-# Expected: 401 {"detail":"Missing API key. Include header: X-API-Key: <your-key>"}
+curl https://economics-chatbot-production-9bb8.up.railway.app/ready
+# Expected: {"ready":true}
 ```
 
-### API Test (with authentication)
+### Authentication required (no key → 401)
 ```bash
-curl -X POST https://lab11-production-c560.up.railway.app/ask \
-  -H "X-API-Key: YOUR_AGENT_API_KEY" \
+curl -X POST https://economics-chatbot-production-9bb8.up.railway.app/chat \
   -H "Content-Type: application/json" \
-  -d '{"question": "Am I on the cloud?"}'
-# Expected: 200 {"question":"...","answer":"...","platform":"Railway"}
+  -d '{"question": "test"}'
+# Expected: 401 {"detail":"Invalid or missing API key..."}
+```
+
+### Chat — Q&A kinh tế học
+```bash
+curl -X POST https://economics-chatbot-production-9bb8.up.railway.app/chat \
+  -H "X-API-Key: dev-key-change-me-in-production" \
+  -H "Content-Type: application/json" \
+  -d '{"question": "GDP la gi?"}'
+# Expected: 200 {"session_id":"...","answer":"...","model":"gpt-4o-mini",...}
+```
+
+### Multi-turn conversation (dùng session_id)
+```bash
+curl -X POST https://economics-chatbot-production-9bb8.up.railway.app/chat \
+  -H "X-API-Key: dev-key-change-me-in-production" \
+  -H "Content-Type: application/json" \
+  -d '{"question": "vi du cu the?", "session_id": "<session_id_tu_response_truoc>"}'
+# Expected: 200 — chatbot nhớ context từ câu hỏi trước
+```
+
+### Metrics (protected)
+```bash
+curl https://economics-chatbot-production-9bb8.up.railway.app/metrics \
+  -H "X-API-Key: dev-key-change-me-in-production"
+# Expected: {"uptime_seconds":...,"daily_cost_usd":...,"budget_used_pct":...}
 ```
 
 ## Environment Variables Set
-- `PORT` — injected automatically by Railway
-- `AGENT_API_KEY` — API key for authentication
-- `ENVIRONMENT` — production
-- `REDIS_URL` — Redis connection string (if using Redis add-on)
+
+| Variable | Value | Purpose |
+|---|---|---|
+| `PORT` | auto | Injected by Railway |
+| `OPENAI_API_KEY` | sk-proj-... | OpenAI API access |
+| `AGENT_API_KEY` | dev-key-change-me-in-production | API authentication |
+| `JWT_SECRET` | dev-jwt-secret-... | JWT signing |
+| `ENVIRONMENT` | production | App mode |
+| `LLM_MODEL` | gpt-4o-mini | OpenAI model |
+| `REDIS_URL` | redis://default:...@redis.railway.internal:6379 | Internal Redis (Railway) |
+
+## Production Readiness Checklist
+
+- [x] 12-Factor config — all config from environment variables
+- [x] Structured JSON logging
+- [x] Multi-stage Docker build (non-root user)
+- [x] API Key authentication (`X-API-Key` header)
+- [x] Rate limiting — sliding window, 10 req/min
+- [x] Cost guard — daily budget $5.00 USD
+- [x] Input validation — Pydantic, max 2000 chars
+- [x] `/health` liveness probe → 200
+- [x] `/ready` readiness probe → 200 (Redis connected)
+- [x] Graceful shutdown — SIGTERM handler
+- [x] Stateless design — Redis-backed session storage
+- [x] Security headers — `X-Content-Type-Options`, `X-Frame-Options`
+- [x] CORS configured
+- [x] Deployed to Railway cloud
 
 ## Screenshots
 - [Deployment dashboard](screenshots/dashboard.png)
